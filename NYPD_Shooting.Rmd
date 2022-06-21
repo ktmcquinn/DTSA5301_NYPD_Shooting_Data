@@ -1,0 +1,135 @@
+---
+title: "NYPD_RMD"
+author: "KM"
+date: "6/05/2022"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE) 
+```
+
+Optional package install, these packages will not be automatically installed on your machine but will be used for this analysis.
+
+``` {r install_packages, echo = TRUE, eval = FALSE}
+install.packages("tidyverse")
+install.packages("dplyr")
+install.packages("lubridate")
+install.packages("ggplot2")
+install.packages("plyr")
+```
+
+Reading in necessary libraries:
+
+```{r library_packages, echo = TRUE, eval = TRUE}
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(RColorBrewer)
+library(plyr)
+```
+
+Reading in the data:
+
+```{r NYPD read_in, echo = TRUE}
+#open data from NYPD 
+NYPD_Shooting_URL <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD" 
+NYPD_Shooting_Raw <- read.csv(NYPD_Shooting_URL)
+```
+
+Now that the data has been read in, I would like to "clean" it a bit and get rid of any columns that are not necessary to my analysis.
+
+```{r NYPD cleaning, echo = TRUE}
+# Keeping columns 2,4,12:14
+NYPD_Shooting_Clean <- NYPD_Shooting_Raw[ , c("OCCUR_DATE", "BORO", "VIC_AGE_GROUP", "VIC_SEX", "VIC_RACE")]
+head(NYPD_Shooting_Clean)
+```
+
+First, I'm going to see if there is any trend of shootings by month of the year by plotting the count of shootings by month as a line chart.
+``` {r NYPD_add_Month_col and basic plot, echo = TRUE}
+#Adding Date Column, pulling month from date, redefining month as integer
+NYPD_Shooting_Clean <- transform(NYPD_Shooting_Clean, Month = as.integer(substr(OCCUR_DATE,1,2)))
+NYPD_Shooting_Clean <- transform(NYPD_Shooting_Clean, Year = as.integer(substr(OCCUR_DATE,7,10)))
+head(NYPD_Shooting_Clean)
+
+#use table function to sum up the normalized values for any given month
+counts <- table(NYPD_Shooting_Clean$Month)
+#plot data from Shootings_by_Month
+plot(counts, main="Shootings by Month", xlab="Month", ylab = "Shootings", type = "l")
+```
+
+I then wanted to show this data as a bar chart. 
+
+```{r Plot Shootings by month, bar chart, echo = TRUE, fig.width = 12}
+#use table function to count up shooting occurrences of any given month
+counts <- table(NYPD_Shooting_Clean$Month)
+#plot data from Shootings_by_Month
+barplot(counts, main="Shootings by Month", xlab="Month", ylab = "Shootings", names.arg = c("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), las=2)
+```
+
+To take it another step further, I'd like to see if there's any pattern of shootings/month but this time visualize it over the years.As you can see below, there seemed to be a steady decline in shootings in NYC from 2005 to 2019, and then a massive jump in shootings in 2020.You can also see that the sections of the bars that represent June, July, and August tend to be a bit taller than the other months.
+
+```{r Plot Shootings by month and year, stacked bar chart, echo = TRUE}
+
+#use table function to count up shooting occurrences of any given month
+counts_ym <- ddply(NYPD_Shooting_Clean, .(NYPD_Shooting_Clean$Year, NYPD_Shooting_Clean$Month), nrow)
+names(counts_ym) <- c("Year", "Month", "Shootings")
+head(counts_ym)
+
+#plot data 
+ggplot(counts_ym, aes(fill = as.factor(Month), x=Year, y=Shootings)) +
+    geom_bar(stat="identity") +   scale_fill_manual(values=c('#D4A150','#AA4225','#8C1E2B','#BE404B','#804750','#5F8755','#68724F','#346778','#21405F','#604A6E','#503931','#BCAC90'), labels = c("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), name = "Month")
+```
+
+After seeing a bit of a trend in the shootings by month of the year (higher shooting rate in July & August), I wanted to dig a little deeper and see if there was any sort of correlation between the average temperature and the number of shootings in NYC. 
+
+``` {r Match_weather_to_Date, echo = TRUE}
+#Reading in scraped weather data from wunderground
+Weather_Data_URL <-"https://raw.githubusercontent.com/ktmcquinn/NYC_weatherdata_2006-2020/main/NYC_Weather_Data_2006-2021.csv"
+Weather_Data_Raw <- read.csv(Weather_Data_URL)
+
+#Rename weather data columns to help facilitate joining of OCCUR_DATE column
+colnames(Weather_Data_Raw) <- c("OCCUR_DATE","Day", "Month", "Year", "Max", "Avg", "Min", "Round.Temp", "Temp.Normalized")
+
+#Join weather data with shooting data
+NYPD_Shooting_byTemp <- inner_join(NYPD_Shooting_Clean, Weather_Data_Raw, "OCCUR_DATE")
+
+# Keeping columns 1:4, 10, 11, 13, 14
+NYPD_Shooting_byTemp <- NYPD_Shooting_byTemp[ , c("OCCUR_DATE", "BORO", "VIC_AGE_GROUP", "VIC_SEX", "Month.y", "Round.Temp","Temp.Normalized")]
+
+head(NYPD_Shooting_byTemp)
+```
+
+This is a bar chart of the raw temperature count vs the number of recorded shootings. This temperature data is not normalized so the data does not consider the amount of days that any given temperature occurs. 
+
+``` {r Plot Shootings by Avg Temperature, echo = TRUE, fig.width = 12}
+#use table function to count up occurrences of any given temperature
+
+counts <- data.frame(table(NYPD_Shooting_byTemp$Round.Temp))
+colnames(counts) <- c("Temp", "Shootings")
+
+#plot bar chart
+ggplot(counts, aes(x =as.numeric(as.character(Temp)), y = Shootings)) +
+  geom_bar(aes(fill = Shootings), stat = "identity") +
+  scale_fill_gradient(low = "yellow", high = "purple", na.value = NA) + labs(x = "Temp")
+```
+
+Plotting temperature vs shootings data again. Since there are more days of the year with certain temperatures, I figured I would normalize the temperature data so as to not skew the data. For example, there seem to be more shootings on warmer days, but I wanted to make sure that it didn't seem that way just because there are MORE "warmer" days than not. You can see here that normalizing the average temperature data really showcases the high amount of shootings on "nicer" days, there is a dramatic spike in shootings between 72 and 79 degrees.
+
+
+``` {r Plot Shootings by Avg Temperature, normalized, echo = TRUE, fig.width = 12}
+#use xtabs function to sum up the normalized values for any given temperature
+sum_normal <- data.frame(xtabs(Temp.Normalized~Round.Temp, NYPD_Shooting_byTemp))
+colnames(sum_normal) <- c("Temp", "Normalized_Shooting_Count")
+
+#plot bar chart
+ggplot(sum_normal, aes(x = as.numeric(as.character(Temp)), y = Normalized_Shooting_Count)) +
+  geom_bar(aes(fill = Normalized_Shooting_Count), stat = "identity") +
+  scale_fill_gradient(low = "yellow", high = "purple", na.value = NA) + theme(axis.text.y=element_blank(),legend.text = element_text(colour="white", size = 1)) + labs(x = "Temp")
+```
+
+From the data shown, it seems we can make some sort of correlation between the average temperature on any given day and the number of shootings that occur. I think possible biases are based solely on the fact that I chose this question as a topic in the first place. I currently live in a city that has its fair share of shootings in the US. It is a personal topic of interest to me because there's just kind of an unspoken awareness of a rise in crime that comes with nicer weather. It's just kind of "known" locally so I was very curious to see if there was actually any data to back that up. As it turns out, it seems like there is a correlation between "nice" weather and a rise in shootings. 
